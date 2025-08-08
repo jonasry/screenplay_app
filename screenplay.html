@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Screenplay Page Writer — Fountain Import/Export</title>
+  <style>
+    :root{ --page-bg:#fafafa; --ink:#111; --accent:#2d6cdf; --toolbar-bg:#fff; --toolbar-border:#ddd }
+    html,body{height:100%;margin:0;background:var(--page-bg);color:var(--ink);font-family:"Courier New", Courier, monospace;font-size:12pt}
+    .toolbar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem;background:var(--toolbar-bg);border-bottom:1px solid var(--toolbar-border);box-shadow:0 1px 4px rgba(0,0,0,.05)}
+    .toolbar button{font-family:inherit;font-size:11pt;padding:.4rem .6rem;border:1px solid var(--toolbar-border);background:#fff;cursor:pointer;border-radius:6px}
+    .toolbar .right{margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap}
+    .toolbar button.active{outline:2px solid var(--accent)}
+
+    .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1rem auto 2rem;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .block{outline:none;white-space:pre-wrap}
+    .block+.block{margin-top:.5rem}
+    .slug{text-transform:uppercase}
+    .action{text-align:left}
+    .dialogue{width:4.25in;margin:0 auto;text-align:left}
+    .character{width:2.5in;margin:1rem auto .2rem;text-align:center;text-transform:uppercase}
+    .paren{width:3.5in;margin:0 auto;text-align:left}
+    .transition{text-align:right;letter-spacing:.5px;text-transform:uppercase}
+
+    .block[data-empty="true"]::before{content:attr(data-placeholder);color:#888;pointer-events:none}
+
+    @media print{body{background:#fff}.toolbar{display:none}.page{box-shadow:none;margin:0;width:auto;min-height:auto}@page{margin:0}}
+  </style>
+</head>
+<body>
+  <div class="toolbar" role="toolbar" aria-label="Screenplay controls">
+    <button data-insert="slug" title="Scene Heading (Ctrl/⌘+1)">Scene Heading</button>
+    <button data-insert="action" title="Action (Ctrl/⌘+2)">Action</button>
+    <button data-insert="character" title="Character (Ctrl/⌘+3)">Character</button>
+    <button data-insert="dialogue" title="Dialogue (Ctrl/⌘+4)">Dialogue</button>
+    <button data-insert="paren" title="Parenthetical (Ctrl/⌘+5)">Parenthetical</button>
+    <button data-insert="transition" title="Transition (Ctrl/⌘+6)">Transition</button>
+    <div class="right">
+      <button id="btn-import">Import .fountain</button>
+      <button id="btn-export">Export .fountain</button>
+      <button id="btn-saveas">Save As…</button>
+      <button id="btn-open">Open in new tab</button>
+      <button id="btn-copy">Copy Fountain</button>
+      <button id="btn-new" title="New Document">New</button>
+      <button id="btn-save" title="Save to browser storage">Save</button>
+      <button id="btn-load" title="Load from browser storage">Load</button>
+      <button id="btn-print" title="Print / Export to PDF">Print / PDF</button>
+    </div>
+    <input type="file" id="file-fountain" accept=".fountain,.txt" hidden />
+  </div>
+
+  <main class="page" id="page" aria-label="Screenplay page" tabindex="-1"></main>
+
+  <script>
+  (function(){
+    const page=document.getElementById('page');
+    const STORAGE_KEY='screenplay-doc-v6';
+
+    const PLACEHOLDERS={ slug:'INT./EXT. LOCATION - DAY/NIGHT', action:'Action: Describe what we see on screen in present tense.', character:'CHARACTER NAME', dialogue:'Dialogue goes here...', paren:'(whispering)', transition:'CUT TO:' };
+
+    // Predictable flows
+    const INSERT_FLOW_NEXT = { // when current line has text: insert a new block of this next type
+      slug: 'action',
+      action: 'character',
+      character: 'dialogue',
+      dialogue: 'character',
+      paren: 'dialogue',
+      transition: 'slug'
+    };
+    const INSERT_FLOW_PREV = { // shift+tab reverse for insert flow
+      action: 'slug',
+      character: 'action',
+      dialogue: 'character',
+      paren: 'character', // rarely used
+      slug: 'transition',
+      transition: 'dialogue' // arbitrary but helpful
+    };
+
+    const CYCLE_FLOW_NEXT = { // when current line is empty: change type in place
+      slug: 'action',
+      action: 'character',
+      character: 'dialogue',
+      dialogue: 'paren',
+      paren: 'dialogue', // toggle
+      transition: 'slug'
+    };
+    const CYCLE_FLOW_PREV = { // backwards cycling on Shift+Tab
+      action: 'slug',
+      character: 'action',
+      dialogue: 'character',
+      paren: 'dialogue',
+      slug: 'transition',
+      transition: 'slug'
+    };
+
+    function nextTypeForInsert(type, backwards){
+      return backwards ? (INSERT_FLOW_PREV[type]||'action') : (INSERT_FLOW_NEXT[type]||'action');
+    }
+    function nextTypeForCycle(type, backwards){
+      return backwards ? (CYCLE_FLOW_PREV[type]||'slug') : (CYCLE_FLOW_NEXT[type]||'action');
+    }
+
+    function createBlock(type,text=''){
+      const el=document.createElement('div');
+      el.className=`block ${type}`; el.contentEditable='true'; el.dataset.type=type; el.dataset.placeholder=PLACEHOLDERS[type]||''; if(!text) el.dataset.empty='true';
+      el.textContent=text; el.addEventListener('input',handleInput); el.addEventListener('keydown',handleKeyDown); return el;
+    }
+    function insertBlock(type,text){
+      const block=createBlock(type,text);
+      const sel=getSelection();
+      const anchor=sel && sel.anchorNode ? findBlock(sel.anchorNode):null;
+      if(anchor && anchor.parentElement===page){ anchor.insertAdjacentElement('afterend',block);} else { page.appendChild(block);} placeCaretAtEnd(block); return block;
+    }
+    function changeBlockType(block, newType, opts={clear:false}){
+      if(!block) { insertBlock(newType); return; }
+      const prevText = opts.clear ? '' : (block.textContent||'');
+      block.className = `block ${newType}`;
+      block.dataset.type = newType;
+      block.dataset.placeholder = PLACEHOLDERS[newType] || '';
+      block.textContent = prevText;
+      block.dataset.empty = block.textContent.trim()? 'false':'true';
+      if(newType==='slug' || newType==='character'){
+        block.textContent = block.textContent.toUpperCase();
+      }
+      placeCaretAtEnd(block);
+      autoSaveDebounced();
+      setActiveButton(newType);
+    }
+
+    function findBlock(node){ while(node && node!==page && !(node.classList && node.classList.contains('block'))){ node=node.parentNode;} return (node && node.classList && node.classList.contains('block'))?node:null; }
+    function getActiveBlock(){ const sel=getSelection(); return sel && sel.anchorNode ? findBlock(sel.anchorNode) : null; }
+    function placeCaretAtEnd(el){ el.focus(); const r=document.createRange(); r.selectNodeContents(el); r.collapse(false); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+
+    function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} autoSaveDebounced(); }
+
+    function handleKeyDown(e){
+      const el=e.currentTarget; const type=el.dataset.type; const hasText=!!el.textContent.trim();
+      // Enter inserts a logical next block
+      if(e.key==='Enter'){
+        e.preventDefault();
+        const next = nextTypeForInsert(type, false);
+        return insertBlock(next);
+      }
+      // Shift+Enter = soft line break
+      if(e.key==='Enter' && e.shiftKey){ document.execCommand('insertLineBreak'); return; }
+      // Tab: if line has text -> insert next type; if empty -> cycle current type
+      if(e.key==='Tab'){
+        e.preventDefault();
+        const backwards = e.shiftKey;
+        if(hasText){
+          const next=nextTypeForInsert(type, backwards);
+          insertBlock(next);
+        } else {
+          const next=nextTypeForCycle(type, backwards);
+          changeBlockType(el, next);
+        }
+      }
+      // Backspace on empty block removes it
+      if(e.key==='Backspace' && !hasText){ e.preventDefault(); const prev=el.previousElementSibling; const parent=el.parentElement; el.remove(); if(prev) placeCaretAtEnd(prev); else parent && parent.focus(); }
+    }
+
+    function setActiveButton(type){ document.querySelectorAll('.toolbar button[data-insert]').forEach(btn=>btn.classList.toggle('active', btn.dataset.insert===type)); }
+
+    // Toolbar buttons: convert current block if focused; otherwise insert new
+    document.querySelectorAll('.toolbar button[data-insert]').forEach(btn=>btn.addEventListener('click', ()=>{
+      const t=btn.dataset.insert; const current=getActiveBlock();
+      if(current){ changeBlockType(current, t); }
+      else { insertBlock(t); }
+    }));
+
+    // Shortcuts convert current when possible
+    document.addEventListener('keydown',(e)=>{ const mod=e.ctrlKey||e.metaKey; if(mod){ const map={'1':'slug','2':'action','3':'character','4':'dialogue','5':'paren','6':'transition'}; const t=map[e.key]; if(t){ e.preventDefault(); const current=getActiveBlock(); if(current) changeBlockType(current, t); else insertBlock(t); } }});
+
+    function toJSON(){ const blocks=[...page.querySelectorAll('.block')].map(b=>({type:b.dataset.type,text:b.textContent})); return {v:6,blocks}; }
+    function fromJSON(obj){ page.innerHTML=''; (obj.blocks||[]).forEach(b=>page.appendChild(createBlock(b.type,b.text||''))); if(!page.firstChild) page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); }
+
+    function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(toJSON())); flash('Saved'); }
+    function load(){ const raw=localStorage.getItem(STORAGE_KEY); if(!raw){ flash('Nothing saved yet'); return;} try{ fromJSON(JSON.parse(raw)); flash('Loaded'); } catch(e){ console.error(e); flash('Load failed'); } }
+    let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
+
+    document.getElementById('btn-save' ).addEventListener('click',save);
+    document.getElementById('btn-load' ).addEventListener('click',load);
+    document.getElementById('btn-new'  ).addEventListener('click',()=>{ if(confirm('Start a new document? Unsaved changes will be lost.')){ page.innerHTML=''; page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild);} });
+    document.getElementById('btn-print').addEventListener('click',()=>window.print());
+
+    // ----- Fountain Import/Export -----
+    const inputFile=document.getElementById('file-fountain');
+    document.getElementById('btn-import').addEventListener('click',()=> inputFile.click());
+    inputFile.addEventListener('change', async (e)=>{ const file=e.target.files[0]; if(!file) return; try{ const text=await file.text(); importFountain(text); }catch(err){ console.error(err); flash('Import failed'); } finally { inputFile.value=''; } });
+
+    document.getElementById('btn-export').addEventListener('click',()=>{
+      try{
+        const txt=exportFountain();
+        if(!txt.trim()){ flash('Nothing to export'); return; }
+        safeDownload('screenplay.fountain', txt);
+        flash('Exported .fountain — check your browser downloads');
+      }catch(err){ console.error(err); flash('Export failed'); }
+    });
+
+    document.getElementById('btn-saveas').addEventListener('click', async()=>{
+      const txt=exportFountain();
+      if(!txt.trim()){ flash('Nothing to save'); return; }
+      if('showSaveFilePicker' in window){
+        try{
+          const handle = await window.showSaveFilePicker({
+            suggestedName: 'screenplay.fountain',
+            types: [{ description: 'Fountain', accept: { 'text/plain': ['.fountain', '.txt'] } }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(new Blob([txt], { type: 'text/plain;charset=utf-8' }));
+          await writable.close();
+          flash('Saved via Save As…');
+        } catch(err){ if(err && err.name !== 'AbortError') { console.error(err); flash('Save As… failed'); } }
+      } else {
+        flash('Save As… not supported in this browser. Use Open in new tab or Copy.');
+      }
+    });
+
+    document.getElementById('btn-open').addEventListener('click',()=>{
+      const txt=exportFountain();
+      const url='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
+      const w=window.open(url, '_blank');
+      if(!w) flash('Popup blocked. Allow popups to preview.');
+    });
+
+    document.getElementById('btn-copy').addEventListener('click', async()=>{
+      const txt=exportFountain();
+      try{ await navigator.clipboard.writeText(txt); flash('Fountain copied'); }
+      catch{ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); flash('Fountain copied'); }
+    });
+
+    function safeDownload(filename, text){
+      const blob=new Blob([text],{type:'application/octet-stream'});
+      const url=(window.URL||window.webkitURL).createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=filename; a.rel='noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=> (window.URL||window.webkitURL).revokeObjectURL(url), 2000);
+    }
+
+    function importFountain(src){
+      const lines=src.replace(/\r\n?/g,'\n').split('\n');
+      const blocks=[]; let i=0;
+      const isSlug=(s)=>/^(?:\s*)(INT\.|EXT\.|INT\/EXT\.|EST\.)/.test(s.trim());
+      const isTransition=(s)=>/^(?:CUT TO:|SMASH TO:|MATCH CUT TO:|FADE TO BLACK\.|FADE OUT:|FADE OUT\.|FADE IN:|DISSOLVE TO:|\w+ TO:)\s*$/i.test(s.trim());
+      const isCharacter=(s)=>{ const t=s.trim(); if(!t) return false; if(/[a-z]/.test(t)) return false; if(/^(INT\.|EXT\.|EST\.)/.test(t)) return false; if(isTransition(t)) return false; return t.length>0 && t.length<40; };
+      const isParen=(s)=>/^\s*\(.+\)\s*$/.test(s);
+
+      while(i<lines.length){
+        let line=lines[i];
+        if(!blocks.length && !isSlug(line) && !isCharacter(line) && !line.trim()){ i++; continue; }
+        if(isSlug(line)){ blocks.push({type:'slug',text:line.trim().toUpperCase()}); i++; continue; }
+        if(isTransition(line)){
+          blocks.push({type:'transition',text:line.trim().toUpperCase()}); i++;
+          continue; }
+        if(isCharacter(line)){
+          blocks.push({type:'character',text:line.trim().toUpperCase()}); i++;
+          if(i<lines.length && isParen(lines[i])){ blocks.push({type:'paren',text:lines[i].trim()}); i++; }
+          let dialogueBuf=[];
+          while(i<lines.length){ const l=lines[i]; if(!l.trim()){ i++; break; } if(isSlug(l)||isTransition(l)||isCharacter(l)) break; if(isParen(l)){ blocks.push({type:'paren',text:l.trim()}); i++; continue;} dialogueBuf.push(l.replace(/^\s{0,10}/,'')); i++; }
+          if(dialogueBuf.length){ blocks.push({type:'dialogue',text:dialogueBuf.join('\n')}); }
+          continue;
+        }
+        if(line.trim()){
+          const actionBuf=[line]; i++;
+          while(i<lines.length){ const l=lines[i]; if(!l.trim()){ i++; break;} if(isSlug(l)||isTransition(l)||isCharacter(l)) break; actionBuf.push(l); i++; }
+          blocks.push({type:'action',text:actionBuf.join('\n')}); continue;
+        }
+        i++;
+      }
+
+      page.innerHTML=''; if(blocks.length===0){ blocks.push({type:'slug',text:''}); }
+      blocks.forEach(b=>page.appendChild(createBlock(b.type,b.text)));
+      placeCaretAtEnd(page.lastChild); flash('Imported Fountain'); save();
+    }
+
+    function exportFountain(){
+      const b=[...page.querySelectorAll('.block')]; const L=[];
+      for(let i=0;i<b.length;i++){
+        const type=b[i].dataset.type; const text=(b[i].textContent||'').replace(/\s+$/,'');
+        if(!text){ if(type==='action' || type==='dialogue'){ L.push(''); } continue; }
+        switch(type){
+          case 'slug': L.push(text.toUpperCase()); L.push(''); break;
+          case 'action': L.push(text); L.push(''); break;
+          case 'character': L.push(text.toUpperCase()); break;
+          case 'paren': L.push(text.trim()); break;
+          case 'dialogue': L.push(text); L.push(''); break;
+          case 'transition': L.push(text.toUpperCase()); L.push(''); break;
+          default: L.push(text); L.push('');
+        }
+      }
+      return L.join('\n').replace(/\n{3,}/g,'\n\n');
+    }
+
+    // caret helpers
+    function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
+    function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+
+    function flash(msg){ const t=document.createElement('div'); t.textContent=msg; Object.assign(t.style,{position:'fixed',bottom:'1rem',left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,.85)',color:'#fff',padding:'.4rem .7rem',borderRadius:'6px',fontSize:'11pt',zIndex:99}); document.body.appendChild(t); setTimeout(()=>t.remove(),1600); }
+
+    // init
+    if(localStorage.getItem(STORAGE_KEY)){ try{ fromJSON(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch{ page.appendChild(createBlock('slug','')); } }
+    else { page.appendChild(createBlock('slug','')); }
+
+    page.addEventListener('focusin', (e)=>{ const b=findBlock(e.target); if(b) b.dataset.empty=b.textContent.trim()?'false':'true'; });
+    page.addEventListener('focusout', (e)=>{ const b=findBlock(e.target); if(b) b.dataset.empty=b.textContent.trim()?'false':'true'; });
+  })();
+  </script>
+</body>
+</html>
