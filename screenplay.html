@@ -18,9 +18,17 @@
     .slug{text-transform:uppercase}
     .action{text-align:left}
     .dialogue{width:4.25in;margin:0 auto;text-align:left}
-    .character{width:2.5in;margin:1rem auto .2rem;text-align:center;text-transform:uppercase}
+    .character{width:2.5in;margin:0 auto .2rem;text-align:center;text-transform:uppercase}
     .paren{width:3.5in;margin:0 auto;text-align:left}
     .transition{text-align:right;letter-spacing:.5px;text-transform:uppercase}
+
+    /* Spacing adjustments for screenplay rhythm */
+    .block + .character{margin-top:1.2em}           /* visual blank line before character */
+    .character + .dialogue{margin-top:.2rem}        /* tighten dialogue after character */
+    .character + .paren{margin-top:.2rem}           /* tight parenthetical after character */
+    .paren + .dialogue{margin-top:.2rem}            /* tight dialogue after parenthetical */
+    .block + .slug{margin-top:1.2em}                /* extra space before new scene */
+    .block + .transition{margin-top:1.2em}          /* extra space before transitions */
 
     .block[data-empty="true"]::before{content:attr(data-placeholder);color:#888;pointer-events:none}
 
