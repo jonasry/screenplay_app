@@ -43,16 +43,16 @@
     .transition{text-align:right;letter-spacing:0.04em;text-transform:uppercase}
 
     /* Spacing adjustments for screenplay rhythm */
+    .block + .slug{margin-top:1.2em}               /* extra space before new scene */
     .block + .character{margin-top:1.2em}          /* visual blank line before character */
+    .block + .transition{margin-top:1.2em}         /* extra space before transitions */
+    .slug + .action{margin-top:1.0em}              /* extra space after slug before first action */
     .character + .dialogue{margin-top:.2em}        /* tighten dialogue after character */
     .character + .paren{margin-top:.2em}           /* tight parenthetical after character */
     .paren + .dialogue{margin-top:.2em}            /* tight dialogue after parenthetical */
     .paren + .action{margin-top:1.2em}             /* extra space when action follows parenthetical */
     .dialogue + .paren {margin-top:.2em}           /* tight dialogue after parenthetical */
     .dialogue + .action{margin-top:1.2em}          /* extra space when action follows dialogue */
-    .block + .slug{margin-top:1.2em}               /* extra space before new scene */
-    .slug + .action{margin-top:1.0em}              /* extra space after slug before first action */
-    .block + .transition{margin-top:1.2em}         /* extra space before transitions */
 
     .block[data-empty="true"]::before{content:attr(data-placeholder);color:#888;pointer-events:none}
 
