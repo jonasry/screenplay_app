@@ -356,7 +356,16 @@
           blocks.push({type:'character',text:line.trim().toUpperCase()}); i++;
           if(i<lines.length && isParen(lines[i])){ blocks.push({type:'paren',text:lines[i].trim()}); i++; }
           let dialogueBuf=[];
-          while(i<lines.length){ const l=lines[i]; if(!l.trim()){ i++; break; } if(isSlug(l)||isTransition(l)||isCharacter(l)) break; if(isParen(l)){ blocks.push({type:'paren',text:l.trim()}); i++; continue;} dialogueBuf.push(l.replace(/^\s{0,10}/,'')); i++; }
+          while(i<lines.length){
+            const l=lines[i];
+            if(!l.trim()){ i++; break; }
+            if(isSlug(l)||isTransition(l)||isCharacter(l)) break;
+            if(isParen(l)){
+              if(dialogueBuf.length){ blocks.push({type:'dialogue',text:dialogueBuf.join('\n')}); dialogueBuf=[]; }
+              blocks.push({type:'paren',text:l.trim()}); i++; continue;
+            }
+            dialogueBuf.push(l.replace(/^\s{0,10}/,'')); i++;
+          }
           if(dialogueBuf.length){ blocks.push({type:'dialogue',text:dialogueBuf.join('\n')}); }
           continue;
         }
@@ -377,15 +386,37 @@
       const b=[...page.querySelectorAll('.block')]; const L=[];
       for(let i=0;i<b.length;i++){
         const type=b[i].dataset.type; const text=(b[i].textContent||'').replace(/\s+$/,'');
+        const nextType = (b[i+1] && b[i+1].dataset.type) || '';
         if(!text){ if(type==='action' || type==='dialogue'){ L.push(''); } continue; }
         switch(type){
-          case 'slug': L.push(text.toUpperCase()); L.push(''); break;
-          case 'action': L.push(text); L.push(''); break;
-          case 'character': L.push(text.toUpperCase()); break;
-          case 'paren': L.push(text.trim()); break;
-          case 'dialogue': L.push(text); L.push(''); break;
-          case 'transition': L.push(text.toUpperCase()); L.push(''); break;
-          default: L.push(text); L.push('');
+          case 'slug':
+            L.push(text.toUpperCase());
+            L.push('');
+            break;
+          case 'action':
+            L.push(text);
+            L.push('');
+            break;
+          case 'character':
+            L.push(text.toUpperCase());
+            break;
+          case 'paren':
+            L.push(text.trim());
+            // If a parenthetical ends the speech (next isn't dialogue/paren), close with a blank line
+            if(nextType !== 'dialogue' && nextType !== 'paren') L.push('');
+            break;
+          case 'dialogue':
+            L.push(text);
+            // Avoid inserting a blank line before a following parenthetical
+            if(nextType !== 'paren') L.push('');
+            break;
+          case 'transition':
+            L.push(text.toUpperCase());
+            L.push('');
+            break;
+          default:
+            L.push(text);
+            L.push('');
         }
       }
       return L.join('\n').replace(/\n{3,}/g,'\n\n');
