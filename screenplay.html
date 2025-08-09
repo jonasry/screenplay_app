@@ -21,6 +21,17 @@
     .menu-panel button:hover,.menu-panel button:focus{background:#f2f2f2;outline:none}
     .menu-sep{border:0;border-top:1px solid #e6e6e6;margin:.3em .2em}
 
+    /* Simple modal for Load dialog */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:50}
+    .modal{background:#fff;color:var(--ink);min-width:22em;max-width:90vw;max-height:80vh;border:1px solid var(--toolbar-border);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.25);padding:1em;display:flex;flex-direction:column;gap:.8em}
+    .modal h3{margin:0 0 .2em 0;font-size:1.1em}
+    .doc-list{display:flex;flex-direction:column;gap:.3em;overflow:auto}
+    .doc-item{display:flex;align-items:center;justify-content:space-between;gap:.8em;border:1px solid #eee;border-radius:8px;padding:.5em .7em}
+    .doc-item button{border:1px solid var(--toolbar-border);padding:.3em .6em;border-radius:6px;background:#fff;cursor:pointer}
+    .doc-meta{display:flex;flex-direction:column}
+    .doc-name{font-weight:600}
+    .doc-updated{font-size:.85em;color:#666}
+
     .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1em auto 2em;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .block{outline:none;white-space:pre-wrap}
     .block+.block{margin-top:.5em}
@@ -68,6 +79,7 @@
           <button id="btn-new" role="menuitem" title="New Document">New</button>
           <button id="btn-save" role="menuitem" title="Save to browser storage">Save</button>
           <button id="btn-saveas" role="menuitem">Save As…</button>
+          <button id="btn-load" role="menuitem">Load…</button>
           <hr class="menu-sep" />
           <button id="btn-print" role="menuitem" title="Print / Export to PDF">Print / PDF</button>
         </div>
@@ -81,7 +93,10 @@
   <script>
   (function(){
     const page=document.getElementById('page');
-    const STORAGE_KEY='screenplay-doc-v6';
+    const LEGACY_SINGLE_KEY='screenplay-doc-v6';
+    const STORAGE_INDEX_KEY='screenplay-index-v1';
+    const STORAGE_CURRENT_KEY='screenplay-current-key';
+    const DOC_PREFIX='screenplay-doc-';
 
     const PLACEHOLDERS={ slug:'INT./EXT. LOCATION - DAY/NIGHT', action:'Action: Describe what we see on screen in present tense.', character:'CHARACTER NAME', dialogue:'Dialogue goes here...', paren:'(whispering)', transition:'CUT TO:' };
 
@@ -198,15 +213,32 @@
     // Shortcuts convert current when possible
     document.addEventListener('keydown',(e)=>{ const mod=e.ctrlKey||e.metaKey; if(mod){ const map={'1':'slug','2':'action','3':'character','4':'dialogue','5':'paren','6':'transition'}; const t=map[e.key]; if(t){ e.preventDefault(); const current=getActiveBlock(); if(current) changeBlockType(current, t); else insertBlock(t); } }});
 
-    function toJSON(){ const blocks=[...page.querySelectorAll('.block')].map(b=>({type:b.dataset.type,text:b.textContent})); return {v:6,blocks}; }
-    function fromJSON(obj){ page.innerHTML=''; (obj.blocks||[]).forEach(b=>page.appendChild(createBlock(b.type,b.text||''))); if(!page.firstChild) page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); }
+    // Multi-document storage helpers
+    function getIndex(){ try{ return JSON.parse(localStorage.getItem(STORAGE_INDEX_KEY)||'[]'); }catch{return []} }
+    function setIndex(list){ localStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(list)); }
+    function slugifyName(name){ return (name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').replace(/-+/g,'-') || 'untitled'; }
+    function generateKey(name){ const base=slugifyName(name||'untitled'); const suf=Math.floor(Date.now()/1000); return `${base}-${suf}`; }
+    function docStorageKey(key){ return DOC_PREFIX+key; }
+    function readDoc(key){ try{ const raw=localStorage.getItem(docStorageKey(key)); return raw? JSON.parse(raw):null; } catch{return null} }
+    function writeDoc(doc){ if(!doc || !doc.key) return; const now=Date.now(); doc.updated=now; localStorage.setItem(docStorageKey(doc.key), JSON.stringify(doc)); const idx=getIndex(); const i=idx.findIndex(x=>x.key===doc.key); const meta={key:doc.key,name:doc.name||'Untitled',updated:doc.updated}; if(i>=0) idx[i]=meta; else idx.push(meta); setIndex(idx); localStorage.setItem(STORAGE_CURRENT_KEY, doc.key); }
+    function getCurrentKey(){ return localStorage.getItem(STORAGE_CURRENT_KEY)||''; }
+    function setCurrentKey(key){ if(key) localStorage.setItem(STORAGE_CURRENT_KEY,key); }
 
-    function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(toJSON())); flash('Saved'); }
-    function load(){ const raw=localStorage.getItem(STORAGE_KEY); if(!raw){ flash('Nothing saved yet'); return;} try{ fromJSON(JSON.parse(raw)); flash('Loaded'); } catch(e){ console.error(e); flash('Load failed'); } }
+    function toJSONDoc(name, key){ const blocks=[...page.querySelectorAll('.block')].map(b=>({type:b.dataset.type,text:b.textContent})); return {v:7,name:name||'Untitled',key,updated:Date.now(),blocks}; }
+    function fromJSONDoc(doc){ page.innerHTML=''; (doc.blocks||[]).forEach(b=>page.appendChild(createBlock(b.type,b.text||''))); if(!page.firstChild) page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); currentName=doc.name||'Untitled'; currentKey=doc.key||''; }
+
+    let currentName='Untitled';
+    let currentKey='';
+    function save(){ if(!currentKey){ currentKey=generateKey(currentName); } const doc=toJSONDoc(currentName,currentKey); writeDoc(doc); flash('Saved'); }
+    async function saveAs(){ const name=prompt('Save As — enter document name:', currentName||'Untitled'); if(!name) return; currentName=name.trim()||'Untitled'; let key=generateKey(currentName); const idx=getIndex(); if(idx.some(d=>d.key===key)) key=`${key}-${Math.floor(Math.random()*1000)}`; currentKey=key; save(); }
+    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); save(); }
+    function loadDocByKey(key){ const d=readDoc(key); if(!d){ flash('Document not found'); return; } fromJSONDoc(d); setCurrentKey(key); flash(`Loaded: ${d.name}`); }
     let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
 
     document.getElementById('btn-save' ).addEventListener('click',save);
-    document.getElementById('btn-new'  ).addEventListener('click',()=>{ if(confirm('Start a new document? Unsaved changes will be lost.')){ page.innerHTML=''; page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild);} });
+    document.getElementById('btn-saveas').addEventListener('click',saveAs);
+    document.getElementById('btn-load' ).addEventListener('click', showLoadDialog);
+    document.getElementById('btn-new'  ).addEventListener('click',()=>{ if(confirm('Start a new document? Unsaved changes will be lost.')){ newDoc(); } });
     document.getElementById('btn-print').addEventListener('click',()=>window.print());
     
     // Hamburger menu toggle + a11y
@@ -242,35 +274,51 @@
     }
 
     // ----- Fountain Import/Export -----
+    function fmtDate(ts){ try{ const d=new Date(ts); return d.toLocaleString(); }catch{return ''} }
+    function showLoadDialog(){
+      const idx = getIndex().sort((a,b)=> (b.updated||0)-(a.updated||0));
+      if(!idx.length){ flash('No saved documents'); return; }
+      const backdrop=document.createElement('div'); backdrop.className='modal-backdrop'; backdrop.tabIndex=-1;
+      const modal=document.createElement('div'); modal.className='modal'; modal.role='dialog'; modal.ariaLabel='Load Document';
+      modal.innerHTML='<h3>Load Document</h3><div class="doc-list"></div>';
+      const list=modal.querySelector('.doc-list');
+      idx.forEach(m=>{
+        const item=document.createElement('div'); item.className='doc-item';
+        const meta=document.createElement('div'); meta.className='doc-meta';
+        const name=document.createElement('div'); name.className='doc-name'; name.textContent=m.name||m.key;
+        const upd=document.createElement('div'); upd.className='doc-updated'; upd.textContent=fmtDate(m.updated);
+        meta.appendChild(name); meta.appendChild(upd);
+        const btn=document.createElement('button'); btn.textContent='Load'; btn.addEventListener('click',()=>{ loadDocByKey(m.key); close(); });
+        item.appendChild(meta); item.appendChild(btn); list.appendChild(item);
+      });
+      function close(){ backdrop.remove(); }
+      backdrop.addEventListener('click',(e)=>{ if(e.target===backdrop) close(); });
+      backdrop.addEventListener('keydown',(e)=>{ if(e.key==='Escape') close(); });
+      backdrop.appendChild(modal); document.body.appendChild(backdrop); modal.focus();
+    }
     const inputFile=document.getElementById('file-fountain');
     document.getElementById('btn-import').addEventListener('click',()=> inputFile.click());
     inputFile.addEventListener('change', async (e)=>{ const file=e.target.files[0]; if(!file) return; try{ const text=await file.text(); importFountain(text); }catch(err){ console.error(err); flash('Import failed'); } finally { inputFile.value=''; } });
 
-    document.getElementById('btn-export').addEventListener('click',()=>{
-      try{
-        const txt=exportFountain();
-        if(!txt.trim()){ flash('Nothing to export'); return; }
-        safeDownload('screenplay.fountain', txt);
-        flash('Exported .fountain — check your browser downloads');
-      }catch(err){ console.error(err); flash('Export failed'); }
-    });
-
-    document.getElementById('btn-saveas').addEventListener('click', async()=>{
+    // Export to filesystem with suggested name from current document
+    document.getElementById('btn-export').addEventListener('click', async()=>{
       const txt=exportFountain();
-      if(!txt.trim()){ flash('Nothing to save'); return; }
+      if(!txt.trim()){ flash('Nothing to export'); return; }
+      const suggested = (slugifyName(currentName)||'screenplay') + '.fountain';
       if('showSaveFilePicker' in window){
         try{
           const handle = await window.showSaveFilePicker({
-            suggestedName: 'screenplay.fountain',
+            suggestedName: suggested,
             types: [{ description: 'Fountain', accept: { 'text/plain': ['.fountain', '.txt'] } }]
           });
           const writable = await handle.createWritable();
           await writable.write(new Blob([txt], { type: 'text/plain;charset=utf-8' }));
           await writable.close();
-          flash('Saved via Save As…');
-        } catch(err){ if(err && err.name !== 'AbortError') { console.error(err); flash('Save As… failed'); } }
+          flash('Exported to file');
+        } catch(err){ if(err && err.name !== 'AbortError') { console.error(err); flash('Export failed'); } }
       } else {
-        flash('Save As… not supported in this browser. Use Open in new tab or Copy.');
+        safeDownload(suggested, txt);
+        flash('Exported — check your downloads');
       }
     });
 
@@ -281,7 +329,8 @@
       if(!w){ flash('Popup blocked. Allow popups to preview.'); return; }
       const doc = w.document;
       doc.open();
-      doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Fountain Preview</title><style>body{margin:0;padding:1rem;background:#fff;color:#111;font-family:"Courier New", Courier, monospace;font-size:12pt} pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style></head><body><pre></pre></body></html>');
+      const title = (currentName||'Fountain Preview').replace(/[<>&]/g,'');
+      doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{margin:0;padding:1rem;background:#fff;color:#111;font-family:"Courier New", Courier, monospace;font-size:12pt} pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style></head><body><pre></pre></body></html>');
       doc.close();
       const pre = doc.querySelector('pre');
       if(pre){ pre.textContent = txt; }
@@ -364,9 +413,28 @@
 
     function flash(msg){ const t=document.createElement('div'); t.textContent=msg; Object.assign(t.style,{position:'fixed',bottom:'1em',left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,.85)',color:'#fff',padding:'.4em .7em',borderRadius:'6px',fontSize:'11pt',zIndex:99}); document.body.appendChild(t); setTimeout(()=>t.remove(),1600); }
 
-    // init
-    if(localStorage.getItem(STORAGE_KEY)){ try{ fromJSON(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch{ page.appendChild(createBlock('slug','')); } }
-    else { page.appendChild(createBlock('slug','')); }
+    // init multi-document
+    (function init(){
+      const cur = getCurrentKey();
+      if(cur){ const d=readDoc(cur); if(d){ fromJSONDoc(d); return; } }
+      const idx = getIndex();
+      if(idx.length){ const latest=idx.slice().sort((a,b)=> (b.updated||0)-(a.updated||0))[0]; const d=readDoc(latest.key); if(d){ fromJSONDoc(d); setCurrentKey(latest.key); return; } }
+      // migrate legacy single doc once
+      const legacy = localStorage.getItem(LEGACY_SINGLE_KEY);
+      if(legacy){
+        try{
+          const obj = JSON.parse(legacy);
+          const name='Imported';
+          const key=generateKey(name);
+          const doc={v:7,name,key,updated:Date.now(),blocks:(obj.blocks||[])};
+          writeDoc(doc);
+          fromJSONDoc(doc);
+          return;
+        }catch{}
+      }
+      // start fresh
+      newDoc();
+    })();
 
     page.addEventListener('focusin', (e)=>{ const b=findBlock(e.target); if(b) b.dataset.empty=b.textContent.trim()?'false':'true'; });
     page.addEventListener('focusout', (e)=>{ const b=findBlock(e.target); if(b) b.dataset.empty=b.textContent.trim()?'false':'true'; });
