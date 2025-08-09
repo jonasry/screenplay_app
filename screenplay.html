@@ -9,7 +9,7 @@
     html,body{height:100%;margin:0;background:var(--page-bg);color:var(--ink);font-family:"Courier New", Courier, monospace;font-size:12pt}
     .toolbar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:.5em;padding:.5em;background:var(--toolbar-bg);border-bottom:1px solid var(--toolbar-border);box-shadow:0 1px 4px rgba(0,0,0,.05)}
     .toolbar button{font-family:inherit;font-size:11pt;padding:.4em .6em;border:1px solid var(--toolbar-border);background:#fff;cursor:pointer;border-radius:6px}
-    .toolbar .right{margin-left:auto;display:flex;gap:.5em;flex-wrap:wrap}
+    .toolbar .right{margin-left:auto;display:flex;gap:.5em;flex-wrap:wrap;align-items:center}
     .toolbar button.active{outline:2px solid var(--accent)}
 
     /* File hamburger menu */
@@ -20,6 +20,7 @@
     .menu-panel button{display:block;width:100%;text-align:left;margin:0;padding:.5em .7em;border:0;background:transparent;border-radius:6px}
     .menu-panel button:hover,.menu-panel button:focus{background:#f2f2f2;outline:none}
     .menu-sep{border:0;border-top:1px solid #e6e6e6;margin:.3em .2em}
+    .doc-title{color:#444;padding:.2em .5em;border:1px dashed transparent;border-radius:6px;max-width:28ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
     /* Simple modal for Load dialog */
     .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:50}
@@ -73,7 +74,7 @@
         <div id="file-menu" class="menu-panel" role="menu" aria-labelledby="btn-menu" hidden>
           <button id="btn-import" role="menuitem">Import .fountain</button>
           <button id="btn-export" role="menuitem">Export .fountain</button>
-          <button id="btn-open" role="menuitem">Preview .fountain</button>
+          <button id="btn-preview" role="menuitem">Preview .fountain</button>
           <button id="btn-copy" role="menuitem">Copy .fountain</button>
           <hr class="menu-sep" />
           <button id="btn-new" role="menuitem" title="New Document">New</button>
@@ -84,6 +85,7 @@
           <button id="btn-print" role="menuitem" title="Print / Export to PDF">Print / PDF</button>
         </div>
       </div>
+      <div id="doc-title" class="doc-title" title="Current document name">Untitled</div>
     </div>
     <input type="file" id="file-fountain" accept=".fountain,.txt" hidden />
   </div>
@@ -173,6 +175,9 @@
     function getActiveBlock(){ const sel=getSelection(); return sel && sel.anchorNode ? findBlock(sel.anchorNode) : null; }
     function placeCaretAtEnd(el){ el.focus(); const r=document.createRange(); r.selectNodeContents(el); r.collapse(false); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }
 
+    function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
+    function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+
     function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} autoSaveDebounced(); }
 
     function handleKeyDown(e){
@@ -213,7 +218,7 @@
     // Shortcuts convert current when possible
     document.addEventListener('keydown',(e)=>{ const mod=e.ctrlKey||e.metaKey; if(mod){ const map={'1':'slug','2':'action','3':'character','4':'dialogue','5':'paren','6':'transition'}; const t=map[e.key]; if(t){ e.preventDefault(); const current=getActiveBlock(); if(current) changeBlockType(current, t); else insertBlock(t); } }});
 
-    // Multi-document storage helpers
+    // ----- Multi-document storage -----
     function getIndex(){ try{ return JSON.parse(localStorage.getItem(STORAGE_INDEX_KEY)||'[]'); }catch{return []} }
     function setIndex(list){ localStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(list)); }
     function slugifyName(name){ return (name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').replace(/-+/g,'-') || 'untitled'; }
@@ -225,14 +230,16 @@
     function setCurrentKey(key){ if(key) localStorage.setItem(STORAGE_CURRENT_KEY,key); }
 
     function toJSONDoc(name, key){ const blocks=[...page.querySelectorAll('.block')].map(b=>({type:b.dataset.type,text:b.textContent})); return {v:7,name:name||'Untitled',key,updated:Date.now(),blocks}; }
-    function fromJSONDoc(doc){ page.innerHTML=''; (doc.blocks||[]).forEach(b=>page.appendChild(createBlock(b.type,b.text||''))); if(!page.firstChild) page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); currentName=doc.name||'Untitled'; currentKey=doc.key||''; }
+    function fromJSONDoc(doc){ page.innerHTML=''; (doc.blocks||[]).forEach(b=>page.appendChild(createBlock(b.type,b.text||''))); if(!page.firstChild) page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); currentName=doc.name||'Untitled'; currentKey=doc.key||''; updateDocTitle(); }
 
     let currentName='Untitled';
     let currentKey='';
-    function save(){ if(!currentKey){ currentKey=generateKey(currentName); } const doc=toJSONDoc(currentName,currentKey); writeDoc(doc); flash('Saved'); }
+    function updateDocTitle(){ const t=document.getElementById('doc-title'); if(t) t.textContent=currentName||'Untitled'; }
+    function save(){ if(!currentKey){ currentKey=generateKey(currentName); } const doc=toJSONDoc(currentName,currentKey); writeDoc(doc); updateDocTitle(); flash('Saved'); }
     async function saveAs(){ const name=prompt('Save As — enter document name:', currentName||'Untitled'); if(!name) return; currentName=name.trim()||'Untitled'; let key=generateKey(currentName); const idx=getIndex(); if(idx.some(d=>d.key===key)) key=`${key}-${Math.floor(Math.random()*1000)}`; currentKey=key; save(); }
     function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); save(); }
     function loadDocByKey(key){ const d=readDoc(key); if(!d){ flash('Document not found'); return; } fromJSONDoc(d); setCurrentKey(key); flash(`Loaded: ${d.name}`); }
+
     let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
 
     document.getElementById('btn-save' ).addEventListener('click',save);
@@ -240,7 +247,7 @@
     document.getElementById('btn-load' ).addEventListener('click', showLoadDialog);
     document.getElementById('btn-new'  ).addEventListener('click',()=>{ if(confirm('Start a new document? Unsaved changes will be lost.')){ newDoc(); } });
     document.getElementById('btn-print').addEventListener('click',()=>window.print());
-    
+
     // Hamburger menu toggle + a11y
     const menuTrigger = document.getElementById('btn-menu');
     const menuPanel = document.getElementById('file-menu');
@@ -265,42 +272,18 @@
       });
       // Close when clicking outside or selecting an item
       document.addEventListener('click', (e)=>{ if(menuPanel.hidden) return; if(!menuPanel.contains(e.target) && e.target!==menuTrigger){ closeMenu(); } });
-      menuPanel.addEventListener('click', (e)=>{ const target=e.target.closest('button'); if(target){ // let action run, then close
-        setTimeout(()=> closeMenu(), 0);
-      }});
+      menuPanel.addEventListener('click', (e)=>{ const target=e.target.closest('button'); if(target){ setTimeout(()=> closeMenu(), 0); }});
       window.addEventListener('blur', closeMenu);
       window.addEventListener('resize', closeMenu);
       window.addEventListener('scroll', closeMenu, true);
     }
 
     // ----- Fountain Import/Export -----
-    function fmtDate(ts){ try{ const d=new Date(ts); return d.toLocaleString(); }catch{return ''} }
-    function showLoadDialog(){
-      const idx = getIndex().sort((a,b)=> (b.updated||0)-(a.updated||0));
-      if(!idx.length){ flash('No saved documents'); return; }
-      const backdrop=document.createElement('div'); backdrop.className='modal-backdrop'; backdrop.tabIndex=-1;
-      const modal=document.createElement('div'); modal.className='modal'; modal.role='dialog'; modal.ariaLabel='Load Document';
-      modal.innerHTML='<h3>Load Document</h3><div class="doc-list"></div>';
-      const list=modal.querySelector('.doc-list');
-      idx.forEach(m=>{
-        const item=document.createElement('div'); item.className='doc-item';
-        const meta=document.createElement('div'); meta.className='doc-meta';
-        const name=document.createElement('div'); name.className='doc-name'; name.textContent=m.name||m.key;
-        const upd=document.createElement('div'); upd.className='doc-updated'; upd.textContent=fmtDate(m.updated);
-        meta.appendChild(name); meta.appendChild(upd);
-        const btn=document.createElement('button'); btn.textContent='Load'; btn.addEventListener('click',()=>{ loadDocByKey(m.key); close(); });
-        item.appendChild(meta); item.appendChild(btn); list.appendChild(item);
-      });
-      function close(){ backdrop.remove(); }
-      backdrop.addEventListener('click',(e)=>{ if(e.target===backdrop) close(); });
-      backdrop.addEventListener('keydown',(e)=>{ if(e.key==='Escape') close(); });
-      backdrop.appendChild(modal); document.body.appendChild(backdrop); modal.focus();
-    }
     const inputFile=document.getElementById('file-fountain');
     document.getElementById('btn-import').addEventListener('click',()=> inputFile.click());
     inputFile.addEventListener('change', async (e)=>{ const file=e.target.files[0]; if(!file) return; try{ const text=await file.text(); importFountain(text); }catch(err){ console.error(err); flash('Import failed'); } finally { inputFile.value=''; } });
 
-    // Export to filesystem with suggested name from current document
+    // Export to filesystem (suggested name from current doc)
     document.getElementById('btn-export').addEventListener('click', async()=>{
       const txt=exportFountain();
       if(!txt.trim()){ flash('Nothing to export'); return; }
@@ -322,7 +305,8 @@
       }
     });
 
-    document.getElementById('btn-open').addEventListener('click',()=>{
+    // Preview .fountain in a new tab
+    document.getElementById('btn-preview').addEventListener('click',()=>{
       const txt=exportFountain();
       if(!txt.trim()){ flash('Nothing to open'); return; }
       const w=window.open('', '_blank');
@@ -330,7 +314,7 @@
       const doc = w.document;
       doc.open();
       const title = (currentName||'Fountain Preview').replace(/[<>&]/g,'');
-      doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{margin:0;padding:1rem;background:#fff;color:#111;font-family:"Courier New", Courier, monospace;font-size:12pt} pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style></head><body><pre></pre></body></html>');
+      doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{margin:0;padding:1rem;background:#fff;color:#111;font-family:\"Courier New\", Courier, monospace;font-size:12pt} pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style></head><body><pre></pre></body></html>');
       doc.close();
       const pre = doc.querySelector('pre');
       if(pre){ pre.textContent = txt; }
@@ -407,11 +391,30 @@
       return L.join('\n').replace(/\n{3,}/g,'\n\n');
     }
 
-    // caret helpers
-    function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
-    function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
-
     function flash(msg){ const t=document.createElement('div'); t.textContent=msg; Object.assign(t.style,{position:'fixed',bottom:'1em',left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,.85)',color:'#fff',padding:'.4em .7em',borderRadius:'6px',fontSize:'11pt',zIndex:99}); document.body.appendChild(t); setTimeout(()=>t.remove(),1600); }
+
+    function fmtDate(ts){ try{ const d=new Date(ts); return d.toLocaleString(); }catch{return ''} }
+    function showLoadDialog(){
+      const idx = getIndex().sort((a,b)=> (b.updated||0)-(a.updated||0));
+      if(!idx.length){ flash('No saved documents'); return; }
+      const backdrop=document.createElement('div'); backdrop.className='modal-backdrop'; backdrop.tabIndex=-1;
+      const modal=document.createElement('div'); modal.className='modal'; modal.role='dialog'; modal.ariaLabel='Load Document';
+      modal.innerHTML='<h3>Load Document</h3><div class="doc-list"></div>';
+      const list=modal.querySelector('.doc-list');
+      idx.forEach(m=>{
+        const item=document.createElement('div'); item.className='doc-item';
+        const meta=document.createElement('div'); meta.className='doc-meta';
+        const name=document.createElement('div'); name.className='doc-name'; name.textContent=m.name||m.key;
+        const upd=document.createElement('div'); upd.className='doc-updated'; upd.textContent=fmtDate(m.updated);
+        meta.appendChild(name); meta.appendChild(upd);
+        const btn=document.createElement('button'); btn.textContent='Load'; btn.addEventListener('click',()=>{ loadDocByKey(m.key); close(); });
+        item.appendChild(meta); item.appendChild(btn); list.appendChild(item);
+      });
+      function close(){ backdrop.remove(); }
+      backdrop.addEventListener('click',(e)=>{ if(e.target===backdrop) close(); });
+      backdrop.addEventListener('keydown',(e)=>{ if(e.key==='Escape') close(); });
+      backdrop.appendChild(modal); document.body.appendChild(backdrop); modal.focus();
+    }
 
     // init multi-document
     (function init(){
