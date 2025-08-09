@@ -14,7 +14,7 @@
 
     .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1rem auto 2rem;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .block{outline:none;white-space:pre-wrap}
-    .block+.block{margin-top:.5rem}
+    .block+.block{margin-top:.5em}
     .slug{text-transform:uppercase}
     .action{text-align:left}
     .dialogue{width:4.25in;margin:0 auto;text-align:left}
@@ -27,10 +27,11 @@
     .character + .dialogue{margin-top:.2rem}        /* tighten dialogue after character */
     .character + .paren{margin-top:.2rem}           /* tight parenthetical after character */
     .paren + .dialogue{margin-top:.2rem}            /* tight dialogue after parenthetical */
-    .paren + .action{margin-top:1.2em}            /* tight dialogue after parenthetical */
-    .dialogue + .paren {margin-top:.2rem}            /* tight dialogue after parenthetical */
+    .paren + .action{margin-top:1.2em}              /* extra space when action follows parenthetical */
+    .dialogue + .paren {margin-top:.2rem}           /* tight dialogue after parenthetical */
     .dialogue + .action{margin-top:1.2em}           /* extra space when action follows dialogue */
     .block + .slug{margin-top:1.2em}                /* extra space before new scene */
+    .slug + .action{margin-top:1.0em}               /* extra space after slug before first action */
     .block + .transition{margin-top:1.2em}          /* extra space before transitions */
 
     .block[data-empty="true"]::before{content:attr(data-placeholder);color:#888;pointer-events:none}
