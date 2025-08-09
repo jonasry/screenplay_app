@@ -7,32 +7,32 @@
   <style>
     :root{ --page-bg:#fafafa; --ink:#111; --accent:#2d6cdf; --toolbar-bg:#fff; --toolbar-border:#ddd }
     html,body{height:100%;margin:0;background:var(--page-bg);color:var(--ink);font-family:"Courier New", Courier, monospace;font-size:12pt}
-    .toolbar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem;background:var(--toolbar-bg);border-bottom:1px solid var(--toolbar-border);box-shadow:0 1px 4px rgba(0,0,0,.05)}
-    .toolbar button{font-family:inherit;font-size:11pt;padding:.4rem .6rem;border:1px solid var(--toolbar-border);background:#fff;cursor:pointer;border-radius:6px}
-    .toolbar .right{margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap}
+    .toolbar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:.5em;padding:.5em;background:var(--toolbar-bg);border-bottom:1px solid var(--toolbar-border);box-shadow:0 1px 4px rgba(0,0,0,.05)}
+    .toolbar button{font-family:inherit;font-size:11pt;padding:.4em .6em;border:1px solid var(--toolbar-border);background:#fff;cursor:pointer;border-radius:6px}
+    .toolbar .right{margin-left:auto;display:flex;gap:.5em;flex-wrap:wrap}
     .toolbar button.active{outline:2px solid var(--accent)}
 
-    .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1rem auto 2rem;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1em auto 2em;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .block{outline:none;white-space:pre-wrap}
     .block+.block{margin-top:.5em}
     .slug{text-transform:uppercase}
     .action{text-align:left}
     .dialogue{width:4.25in;margin:0 auto;text-align:left}
-    .character{width:2.5in;margin:0 auto .2rem;text-align:center;text-transform:uppercase}
+    .character{width:2.5in;margin:0 auto .2em;text-align:center;text-transform:uppercase}
     .paren{width:3.5in;margin:0 auto;text-align:left}
     .transition{text-align:right;letter-spacing:.5px;text-transform:uppercase}
 
     /* Spacing adjustments for screenplay rhythm */
-    .block + .character{margin-top:1.2em}           /* visual blank line before character */
-    .character + .dialogue{margin-top:.2rem}        /* tighten dialogue after character */
-    .character + .paren{margin-top:.2rem}           /* tight parenthetical after character */
-    .paren + .dialogue{margin-top:.2rem}            /* tight dialogue after parenthetical */
-    .paren + .action{margin-top:1.2em}              /* extra space when action follows parenthetical */
-    .dialogue + .paren {margin-top:.2rem}           /* tight dialogue after parenthetical */
-    .dialogue + .action{margin-top:1.2em}           /* extra space when action follows dialogue */
-    .block + .slug{margin-top:1.2em}                /* extra space before new scene */
-    .slug + .action{margin-top:1.0em}               /* extra space after slug before first action */
-    .block + .transition{margin-top:1.2em}          /* extra space before transitions */
+    .block + .character{margin-top:1.2em}          /* visual blank line before character */
+    .character + .dialogue{margin-top:.2em}        /* tighten dialogue after character */
+    .character + .paren{margin-top:.2em}           /* tight parenthetical after character */
+    .paren + .dialogue{margin-top:.2em}            /* tight dialogue after parenthetical */
+    .paren + .action{margin-top:1.2em}             /* extra space when action follows parenthetical */
+    .dialogue + .paren {margin-top:.2em}           /* tight dialogue after parenthetical */
+    .dialogue + .action{margin-top:1.2em}          /* extra space when action follows dialogue */
+    .block + .slug{margin-top:1.2em}               /* extra space before new scene */
+    .slug + .action{margin-top:1.0em}              /* extra space after slug before first action */
+    .block + .transition{margin-top:1.2em}         /* extra space before transitions */
 
     .block[data-empty="true"]::before{content:attr(data-placeholder);color:#888;pointer-events:none}
 
@@ -310,7 +310,7 @@
     function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
     function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
 
-    function flash(msg){ const t=document.createElement('div'); t.textContent=msg; Object.assign(t.style,{position:'fixed',bottom:'1rem',left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,.85)',color:'#fff',padding:'.4rem .7rem',borderRadius:'6px',fontSize:'11pt',zIndex:99}); document.body.appendChild(t); setTimeout(()=>t.remove(),1600); }
+    function flash(msg){ const t=document.createElement('div'); t.textContent=msg; Object.assign(t.style,{position:'fixed',bottom:'1em',left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,.85)',color:'#fff',padding:'.4em .7em',borderRadius:'6px',fontSize:'11pt',zIndex:99}); document.body.appendChild(t); setTimeout(()=>t.remove(),1600); }
 
     // init
     if(localStorage.getItem(STORAGE_KEY)){ try{ fromJSON(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch{ page.appendChild(createBlock('slug','')); } }
