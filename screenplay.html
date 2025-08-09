@@ -12,6 +12,15 @@
     .toolbar .right{margin-left:auto;display:flex;gap:.5em;flex-wrap:wrap}
     .toolbar button.active{outline:2px solid var(--accent)}
 
+    /* File hamburger menu */
+    .menu{position:relative}
+    .menu-trigger{display:flex;align-items:center;gap:.4em}
+    .menu-panel{position:absolute;right:0;top:calc(100% + .25em);min-width:14rem;background:#fff;border:1px solid var(--toolbar-border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:.4em;display:flex;flex-direction:column;z-index:11}
+    .menu-panel[hidden]{display:none !important}
+    .menu-panel button{display:block;width:100%;text-align:left;margin:0;padding:.5em .7em;border:0;background:transparent;border-radius:6px}
+    .menu-panel button:hover,.menu-panel button:focus{background:#f2f2f2;outline:none}
+    .menu-sep{border:0;border-top:1px solid #e6e6e6;margin:.3em .2em}
+
     .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1em auto 2em;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .block{outline:none;white-space:pre-wrap}
     .block+.block{margin-top:.5em}
@@ -48,15 +57,21 @@
     <button data-insert="paren" title="Parenthetical (Ctrl/⌘+5)">Parenthetical</button>
     <button data-insert="transition" title="Transition (Ctrl/⌘+6)">Transition</button>
     <div class="right">
-      <button id="btn-import">Import .fountain</button>
-      <button id="btn-export">Export .fountain</button>
-      <button id="btn-saveas">Save As…</button>
-      <button id="btn-open">Open in new tab</button>
-      <button id="btn-copy">Copy Fountain</button>
-      <button id="btn-new" title="New Document">New</button>
-      <button id="btn-save" title="Save to browser storage">Save</button>
-      <button id="btn-load" title="Load from browser storage">Load</button>
-      <button id="btn-print" title="Print / Export to PDF">Print / PDF</button>
+      <div class="menu">
+        <button id="btn-menu" class="menu-trigger" aria-haspopup="true" aria-expanded="false" aria-controls="file-menu" title="File menu">☰ File</button>
+        <div id="file-menu" class="menu-panel" role="menu" aria-labelledby="btn-menu" hidden>
+          <button id="btn-import" role="menuitem">Import .fountain</button>
+          <button id="btn-export" role="menuitem">Export .fountain</button>
+          <button id="btn-open" role="menuitem">Preview .fountain</button>
+          <button id="btn-copy" role="menuitem">Copy .fountain</button>
+          <hr class="menu-sep" />
+          <button id="btn-new" role="menuitem" title="New Document">New</button>
+          <button id="btn-save" role="menuitem" title="Save to browser storage">Save</button>
+          <button id="btn-saveas" role="menuitem">Save As…</button>
+          <hr class="menu-sep" />
+          <button id="btn-print" role="menuitem" title="Print / Export to PDF">Print / PDF</button>
+        </div>
+      </div>
     </div>
     <input type="file" id="file-fountain" accept=".fountain,.txt" hidden />
   </div>
@@ -191,9 +206,40 @@
     let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
 
     document.getElementById('btn-save' ).addEventListener('click',save);
-    document.getElementById('btn-load' ).addEventListener('click',load);
     document.getElementById('btn-new'  ).addEventListener('click',()=>{ if(confirm('Start a new document? Unsaved changes will be lost.')){ page.innerHTML=''; page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild);} });
     document.getElementById('btn-print').addEventListener('click',()=>window.print());
+    
+    // Hamburger menu toggle + a11y
+    const menuTrigger = document.getElementById('btn-menu');
+    const menuPanel = document.getElementById('file-menu');
+    const menuItems = () => [...menuPanel.querySelectorAll('button[role="menuitem"]')];
+    function openMenu(){ if(!menuPanel || !menuTrigger) return; menuPanel.hidden=false; menuTrigger.setAttribute('aria-expanded','true'); setTimeout(()=>{ const first=menuItems()[0]; first && first.focus(); },0); }
+    function closeMenu(){ if(!menuPanel || !menuTrigger) return; menuPanel.hidden=true; menuTrigger.setAttribute('aria-expanded','false'); }
+    function toggleMenu(){ if(menuPanel.hidden) openMenu(); else { closeMenu(); menuTrigger.focus(); } }
+    if(menuTrigger){
+      menuTrigger.addEventListener('click', (e)=>{ e.stopPropagation(); toggleMenu(); });
+      menuTrigger.addEventListener('keydown', (e)=>{ if((e.key==='ArrowDown'||e.key==='Enter'||e.key===' ') && menuPanel){ e.preventDefault(); openMenu(); } });
+    }
+    if(menuPanel){
+      // Basic arrow key navigation within menu
+      menuPanel.addEventListener('keydown', (e)=>{
+        const items=menuItems(); if(!items.length) return;
+        const idx = items.indexOf(document.activeElement);
+        if(e.key==='Escape'){ e.preventDefault(); closeMenu(); menuTrigger.focus(); return; }
+        if(e.key==='ArrowDown'){ e.preventDefault(); const n = items[(idx+1)%items.length]; n && n.focus(); }
+        if(e.key==='ArrowUp'){ e.preventDefault(); const p = items[(idx-1+items.length)%items.length]; p && p.focus(); }
+        if(e.key==='Home'){ e.preventDefault(); items[0].focus(); }
+        if(e.key==='End'){ e.preventDefault(); items[items.length-1].focus(); }
+      });
+      // Close when clicking outside or selecting an item
+      document.addEventListener('click', (e)=>{ if(menuPanel.hidden) return; if(!menuPanel.contains(e.target) && e.target!==menuTrigger){ closeMenu(); } });
+      menuPanel.addEventListener('click', (e)=>{ const target=e.target.closest('button'); if(target){ // let action run, then close
+        setTimeout(()=> closeMenu(), 0);
+      }});
+      window.addEventListener('blur', closeMenu);
+      window.addEventListener('resize', closeMenu);
+      window.addEventListener('scroll', closeMenu, true);
+    }
 
     // ----- Fountain Import/Export -----
     const inputFile=document.getElementById('file-fountain');
@@ -230,9 +276,15 @@
 
     document.getElementById('btn-open').addEventListener('click',()=>{
       const txt=exportFountain();
-      const url='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
-      const w=window.open(url, '_blank');
-      if(!w) flash('Popup blocked. Allow popups to preview.');
+      if(!txt.trim()){ flash('Nothing to open'); return; }
+      const w=window.open('', '_blank');
+      if(!w){ flash('Popup blocked. Allow popups to preview.'); return; }
+      const doc = w.document;
+      doc.open();
+      doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Fountain Preview</title><style>body{margin:0;padding:1rem;background:#fff;color:#111;font-family:"Courier New", Courier, monospace;font-size:12pt} pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style></head><body><pre></pre></body></html>');
+      doc.close();
+      const pre = doc.querySelector('pre');
+      if(pre){ pre.textContent = txt; }
     });
 
     document.getElementById('btn-copy').addEventListener('click', async()=>{
