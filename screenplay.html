@@ -178,7 +178,7 @@
         block.textContent = block.textContent.toUpperCase();
       }
       placeCaretAtEnd(block);
-      autoSaveDebounced(); repaginateDebounced();
+      markDirty(); repaginateDebounced();
       setActiveButton(newType);
     }
 
@@ -189,7 +189,7 @@
     function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
     function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
 
-    function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} autoSaveDebounced(); repaginateDebounced(); }
+    function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} markDirty(); repaginateDebounced(); }
 
     function handleKeyDown(e){
       const el=e.currentTarget; const type=el.dataset.type; const hasText=!!el.textContent.trim();
@@ -207,14 +207,14 @@
         const backwards = e.shiftKey;
         if(hasText){
           const next=nextTypeForInsert(type, backwards);
-          insertBlock(next);
+          insertBlock(next); markDirty();
         } else {
           const next=nextTypeForCycle(type, backwards);
-          changeBlockType(el, next);
+          changeBlockType(el, next); markDirty();
         }
       }
       // Backspace on empty block removes it
-      if(e.key==='Backspace' && !hasText){ e.preventDefault(); const prev=el.previousElementSibling; const parent=el.parentElement; el.remove(); if(prev) placeCaretAtEnd(prev); else parent && parent.focus(); repaginateDebounced(); }
+      if(e.key==='Backspace' && !hasText){ e.preventDefault(); const prev=el.previousElementSibling; const parent=el.parentElement; el.remove(); markDirty(); if(prev) placeCaretAtEnd(prev); else parent && parent.focus(); repaginateDebounced(); }
     }
 
     function setActiveButton(type){ document.querySelectorAll('.toolbar button[data-insert]').forEach(btn=>btn.classList.toggle('active', btn.dataset.insert===type)); }
@@ -245,10 +245,22 @@
 
     let currentName='Untitled';
     let currentKey='';
+    let dirty=false;
+    function markDirty(){ dirty=true; autoSaveDebounced(); }
     function updateDocTitle(){ const t=document.getElementById('doc-title'); if(t) t.textContent=currentName||'Untitled'; }
-    function save(){ if(!currentKey){ currentKey=generateKey(currentName); } const doc=toJSONDoc(currentName,currentKey); writeDoc(doc); updateDocTitle(); flash('Saved'); }
-    async function saveAs(){ const name=prompt('Save As — enter document name:', currentName||'Untitled'); if(!name) return; currentName=name.trim()||'Untitled'; let key=generateKey(currentName); const idx=getIndex(); if(idx.some(d=>d.key===key)) key=`${key}-${Math.floor(Math.random()*1000)}`; currentKey=key; save(); }
-    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; getLastSheet().appendChild(createBlock('slug','')); repaginate(); placeCaretAtEnd(page.querySelector('.block:last-of-type')); save(); }
+    function save(force=false){
+      const blocks=[...page.querySelectorAll('.block')];
+      const hasText = blocks.some(b=> (b.textContent||'').trim());
+      if(!force && (!dirty || !hasText)) return;
+      if(!currentKey){ currentKey=generateKey(currentName); }
+      const doc=toJSONDoc(currentName,currentKey);
+      writeDoc(doc);
+      updateDocTitle();
+      dirty=false;
+      flash('Saved');
+    }
+    async function saveAs(){ const name=prompt('Save As — enter document name:', currentName||'Untitled'); if(!name) return; currentName=name.trim()||'Untitled'; let key=generateKey(currentName); const idx=getIndex(); if(idx.some(d=>d.key===key)) key=`${key}-${Math.floor(Math.random()*1000)}`; currentKey=key; save(true); }
+    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; getLastSheet().appendChild(createBlock('slug','')); repaginate(); placeCaretAtEnd(page.querySelector('.block:last-of-type')); dirty=false; updateDocTitle(); }
     function loadDocByKey(key){ const d=readDoc(key); if(!d){ flash('Document not found'); return; } fromJSONDoc(d); setCurrentKey(key); flash(`Loaded: ${d.name}`); }
 
     let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,15000); }
@@ -256,7 +268,11 @@
     document.getElementById('btn-save' ).addEventListener('click',save);
     document.getElementById('btn-saveas').addEventListener('click',saveAs);
     document.getElementById('btn-load' ).addEventListener('click', showLoadDialog);
-    document.getElementById('btn-new'  ).addEventListener('click',()=>{ if(confirm('Start a new document? Unsaved changes will be lost.')){ newDoc(); } });
+    document.getElementById('btn-new'  ).addEventListener('click',()=>{ 
+      // Ensure current edits are persisted before starting fresh
+      save();
+      newDoc();
+    });
     document.getElementById('btn-print').addEventListener('click',()=>window.print());
 
     // Hamburger menu toggle + a11y
