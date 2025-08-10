@@ -33,7 +33,8 @@
     .doc-name{font-weight:600}
     .doc-updated{font-size:.85em;color:#666}
 
-    .page{box-sizing:border-box;width:8.5in;min-height:11in;margin:1em auto 2em;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .page{box-sizing:border-box;width:8.5in;height:11in;margin:1em auto 2em;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08);overflow:hidden;position:relative}
+    .page + .page::before{content:'';position:absolute;top:-1em;left:50%;transform:translateX(-50%);width:7.5in;border-top:1px dashed #ddd}
     .block{outline:none;white-space:pre-wrap}
     .block+.block{margin-top:.5em}
     .slug{text-transform:uppercase}
@@ -58,7 +59,12 @@
 
     .block[data-empty="true"]::before{content:attr(data-placeholder);color:#888;pointer-events:none}
 
-    @media print{body{background:#fff}.toolbar{display:none}.page{box-shadow:none;margin:0;width:auto;min-height:auto}@page{margin:0}}
+    @media print{
+      body{background:#fff}
+      .toolbar{display:none}
+      .page{box-shadow:none;margin:0 auto;width:8.5in;height:11in;page-break-after:always}
+      @page{margin:0}
+    }
   </style>
 </head>
 <body>
@@ -91,7 +97,7 @@
     <input type="file" id="file-fountain" accept=".fountain,.txt" hidden />
   </div>
 
-  <main class="page" id="page" aria-label="Screenplay page" tabindex="-1"></main>
+  <main class="pages" id="page" aria-label="Screenplay pages" tabindex="-1"></main>
 
   <script>
   (function(){
@@ -150,11 +156,13 @@
       el.className=`block ${type}`; el.contentEditable='true'; el.dataset.type=type; el.dataset.placeholder=PLACEHOLDERS[type]||''; if(!text) el.dataset.empty='true';
       el.textContent=text; el.addEventListener('input',handleInput); el.addEventListener('keydown',handleKeyDown); return el;
     }
+    function createSheet(){ const s=document.createElement('section'); s.className='page'; return s; }
+    function getLastSheet(){ let s=page.querySelector('.page:last-of-type'); if(!s){ s=createSheet(); page.appendChild(s);} return s; }
     function insertBlock(type,text){
       const block=createBlock(type,text);
       const sel=getSelection();
       const anchor=sel && sel.anchorNode ? findBlock(sel.anchorNode):null;
-      if(anchor && anchor.parentElement===page){ anchor.insertAdjacentElement('afterend',block);} else { page.appendChild(block);} placeCaretAtEnd(block); return block;
+      if(anchor){ anchor.insertAdjacentElement('afterend',block);} else { getLastSheet().appendChild(block);} placeCaretAtEnd(block); repaginateDebounced(); return block;
     }
     function changeBlockType(block, newType, opts={clear:false}){
       if(!block) { insertBlock(newType); return; }
@@ -168,7 +176,7 @@
         block.textContent = block.textContent.toUpperCase();
       }
       placeCaretAtEnd(block);
-      autoSaveDebounced();
+      autoSaveDebounced(); repaginateDebounced();
       setActiveButton(newType);
     }
 
@@ -179,7 +187,7 @@
     function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
     function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
 
-    function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} autoSaveDebounced(); }
+    function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} autoSaveDebounced(); repaginateDebounced(); }
 
     function handleKeyDown(e){
       const el=e.currentTarget; const type=el.dataset.type; const hasText=!!el.textContent.trim();
@@ -204,7 +212,7 @@
         }
       }
       // Backspace on empty block removes it
-      if(e.key==='Backspace' && !hasText){ e.preventDefault(); const prev=el.previousElementSibling; const parent=el.parentElement; el.remove(); if(prev) placeCaretAtEnd(prev); else parent && parent.focus(); }
+      if(e.key==='Backspace' && !hasText){ e.preventDefault(); const prev=el.previousElementSibling; const parent=el.parentElement; el.remove(); if(prev) placeCaretAtEnd(prev); else parent && parent.focus(); repaginateDebounced(); }
     }
 
     function setActiveButton(type){ document.querySelectorAll('.toolbar button[data-insert]').forEach(btn=>btn.classList.toggle('active', btn.dataset.insert===type)); }
@@ -231,14 +239,14 @@
     function setCurrentKey(key){ if(key) localStorage.setItem(STORAGE_CURRENT_KEY,key); }
 
     function toJSONDoc(name, key){ const blocks=[...page.querySelectorAll('.block')].map(b=>({type:b.dataset.type,text:b.textContent})); return {v:7,name:name||'Untitled',key,updated:Date.now(),blocks}; }
-    function fromJSONDoc(doc){ page.innerHTML=''; (doc.blocks||[]).forEach(b=>page.appendChild(createBlock(b.type,b.text||''))); if(!page.firstChild) page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); currentName=doc.name||'Untitled'; currentKey=doc.key||''; updateDocTitle(); }
+    function fromJSONDoc(doc){ page.innerHTML=''; (doc.blocks||[]).forEach(b=>getLastSheet().appendChild(createBlock(b.type,b.text||''))); if(!page.querySelector('.block')) getLastSheet().appendChild(createBlock('slug','')); repaginate(); placeCaretAtEnd(page.querySelector('.block:last-of-type')); currentName=doc.name||'Untitled'; currentKey=doc.key||''; updateDocTitle(); }
 
     let currentName='Untitled';
     let currentKey='';
     function updateDocTitle(){ const t=document.getElementById('doc-title'); if(t) t.textContent=currentName||'Untitled'; }
     function save(){ if(!currentKey){ currentKey=generateKey(currentName); } const doc=toJSONDoc(currentName,currentKey); writeDoc(doc); updateDocTitle(); flash('Saved'); }
     async function saveAs(){ const name=prompt('Save As — enter document name:', currentName||'Untitled'); if(!name) return; currentName=name.trim()||'Untitled'; let key=generateKey(currentName); const idx=getIndex(); if(idx.some(d=>d.key===key)) key=`${key}-${Math.floor(Math.random()*1000)}`; currentKey=key; save(); }
-    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; page.appendChild(createBlock('slug','')); placeCaretAtEnd(page.lastChild); save(); }
+    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; getLastSheet().appendChild(createBlock('slug','')); repaginate(); placeCaretAtEnd(page.querySelector('.block:last-of-type')); save(); }
     function loadDocByKey(key){ const d=readDoc(key); if(!d){ flash('Document not found'); return; } fromJSONDoc(d); setCurrentKey(key); flash(`Loaded: ${d.name}`); }
 
     let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
@@ -280,6 +288,29 @@
     }
 
     // ----- Fountain Import/Export -----
+    // Pagination: split blocks into 11in pages that respect padding
+    function repaginate(){
+      // Collect blocks in order
+      const blocks=[...page.querySelectorAll('.block')];
+      if(blocks.length===0){ // ensure at least one empty sheet
+        page.innerHTML=''; page.appendChild(createSheet()); return;
+      }
+      // Remove all sheets and rebuild
+      page.innerHTML='';
+      let sheet=createSheet();
+      page.appendChild(sheet);
+      for(const b of blocks){
+        sheet.appendChild(b);
+        // If overflow, move block to a new sheet
+        if(sheet.scrollHeight>sheet.clientHeight){
+          sheet.removeChild(b);
+          sheet=createSheet();
+          page.appendChild(sheet);
+          sheet.appendChild(b);
+        }
+      }
+    }
+    let paginateTimer=null; function repaginateDebounced(){ clearTimeout(paginateTimer); paginateTimer=setTimeout(repaginate,120); }
     const inputFile=document.getElementById('file-fountain');
     document.getElementById('btn-import').addEventListener('click',()=> inputFile.click());
     inputFile.addEventListener('change', async (e)=>{ const file=e.target.files[0]; if(!file) return; try{ const text=await file.text(); importFountain(text); }catch(err){ console.error(err); flash('Import failed'); } finally { inputFile.value=''; } });
@@ -379,8 +410,10 @@
       }
 
       page.innerHTML=''; if(blocks.length===0){ blocks.push({type:'slug',text:''}); }
-      blocks.forEach(b=>page.appendChild(createBlock(b.type,b.text)));
-      placeCaretAtEnd(page.lastChild); flash('Imported Fountain'); save();
+      getLastSheet();
+      blocks.forEach(b=>getLastSheet().appendChild(createBlock(b.type,b.text)));
+      repaginate();
+      placeCaretAtEnd(page.querySelector('.block:last-of-type')); flash('Imported Fountain'); save();
     }
 
     function exportFountain(){
