@@ -220,6 +220,8 @@
     }
 
     function setActiveButton(type){ document.querySelectorAll('.toolbar button[data-insert]').forEach(btn=>btn.classList.toggle('active', btn.dataset.insert===type)); }
+    // Reflect caret location in toolbar selection
+    function refreshActiveFromSelection(){ const b=getActiveBlock(); setActiveButton(b? b.dataset.type : ''); }
 
     // Toolbar buttons: convert current block if focused; otherwise insert new
     document.querySelectorAll('.toolbar button[data-insert]').forEach(btn=>btn.addEventListener('click', ()=>{
@@ -230,6 +232,7 @@
 
     // Shortcuts convert current when possible
     document.addEventListener('keydown',(e)=>{ const mod=e.ctrlKey||e.metaKey; if(mod){ const map={'1':'slug','2':'action','3':'character','4':'dialogue','5':'paren','6':'transition'}; const t=map[e.key]; if(t){ e.preventDefault(); const current=getActiveBlock(); if(current) changeBlockType(current, t); else insertBlock(t); } }});
+    document.addEventListener('selectionchange', refreshActiveFromSelection);
 
     // ----- Multi-document storage -----
     function getIndex(){ try{ return JSON.parse(localStorage.getItem(STORAGE_INDEX_KEY)||'[]'); }catch{return []} }
@@ -530,7 +533,7 @@
 
     // init multi-document
     (function init(){
-      updateToolbarHeight(); updateStatusIndicator();
+      updateToolbarHeight(); updateStatusIndicator(); refreshActiveFromSelection();
       window.addEventListener('resize', updateToolbarHeight);
       const cur = getCurrentKey();
       if(cur){ const d=readDoc(cur); if(d){ fromJSONDoc(d); return; } }
