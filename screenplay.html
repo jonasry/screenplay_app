@@ -21,6 +21,7 @@
     .menu-panel button:hover,.menu-panel button:focus{background:#f2f2f2;outline:none}
     .menu-sep{border:0;border-top:1px solid #e6e6e6;margin:.3em .2em}
     .doc-title{color:#444;padding:.2em .5em;border:1px dashed transparent;border-radius:6px;max-width:28ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .doc-status{font-size:1.1em}
 
     /* Simple modal for Load dialog */
     .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:50}
@@ -78,6 +79,8 @@
     <button data-insert="paren" title="Parenthetical (Ctrl/⌘+5)">Parenthetical</button>
     <button data-insert="transition" title="Transition (Ctrl/⌘+6)">Transition</button>
     <div class="right">
+      <div id="doc-title" class="doc-title" title="Current document name">Untitled</div>
+      <div id="doc-status" class="doc-status" title="All changes saved locally">✅</div>
       <div class="menu">
         <button id="btn-menu" class="menu-trigger" aria-haspopup="true" aria-expanded="false" aria-controls="file-menu" title="File menu">☰ File</button>
         <div id="file-menu" class="menu-panel" role="menu" aria-labelledby="btn-menu" hidden>
@@ -94,7 +97,6 @@
           <button id="btn-print" role="menuitem" title="Print / Export to PDF">Print / PDF</button>
         </div>
       </div>
-      <div id="doc-title" class="doc-title" title="Current document name">Untitled</div>
     </div>
     <input type="file" id="file-fountain" accept=".fountain,.txt" hidden />
   </div>
@@ -246,7 +248,8 @@
     let currentName='Untitled';
     let currentKey='';
     let dirty=false;
-    function markDirty(){ dirty=true; autoSaveDebounced(); }
+    function updateStatusIndicator(){ const s=document.getElementById('doc-status'); if(!s) return; if(dirty){ s.textContent='🖋️'; s.title='Unsaved changes — will auto-save'; } else { s.textContent='✅'; s.title='All changes saved locally'; } }
+    function markDirty(){ dirty=true; updateStatusIndicator(); autoSaveDebounced(); }
     function updateDocTitle(){ const t=document.getElementById('doc-title'); if(t) t.textContent=currentName||'Untitled'; }
     function save(force=false){
       const blocks=[...page.querySelectorAll('.block')];
@@ -256,11 +259,11 @@
       const doc=toJSONDoc(currentName,currentKey);
       writeDoc(doc);
       updateDocTitle();
-      dirty=false;
+      dirty=false; updateStatusIndicator();
       flash('Saved');
     }
     async function saveAs(){ const name=prompt('Save As — enter document name:', currentName||'Untitled'); if(!name) return; currentName=name.trim()||'Untitled'; let key=generateKey(currentName); const idx=getIndex(); if(idx.some(d=>d.key===key)) key=`${key}-${Math.floor(Math.random()*1000)}`; currentKey=key; save(true); }
-    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; getLastSheet().appendChild(createBlock('slug','')); repaginate(); placeCaretAtEnd(page.querySelector('.block:last-of-type')); dirty=false; updateDocTitle(); }
+    function newDoc(){ currentName='Untitled'; currentKey=generateKey(currentName); page.innerHTML=''; getLastSheet().appendChild(createBlock('slug','')); repaginate(); placeCaretAtEnd(page.querySelector('.block:last-of-type')); dirty=false; updateDocTitle(); updateStatusIndicator(); }
     function loadDocByKey(key){ const d=readDoc(key); if(!d){ flash('Document not found'); return; } fromJSONDoc(d); setCurrentKey(key); flash(`Loaded: ${d.name}`); }
 
     let saveTimer=null; function autoSaveDebounced(){ clearTimeout(saveTimer); saveTimer=setTimeout(save,15000); }
@@ -527,7 +530,7 @@
 
     // init multi-document
     (function init(){
-      updateToolbarHeight();
+      updateToolbarHeight(); updateStatusIndicator();
       window.addEventListener('resize', updateToolbarHeight);
       const cur = getCurrentKey();
       if(cur){ const d=readDoc(cur); if(d){ fromJSONDoc(d); return; } }
