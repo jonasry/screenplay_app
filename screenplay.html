@@ -158,7 +158,8 @@
     function createBlock(type,text=''){
       const el=document.createElement('div');
       el.className=`block ${type}`; el.contentEditable='true'; el.dataset.type=type; el.dataset.placeholder=PLACEHOLDERS[type]||''; if(!text) el.dataset.empty='true';
-      el.textContent=text; el.addEventListener('input',handleInput); el.addEventListener('keydown',handleKeyDown); return el;
+      el.textContent=text; el.addEventListener('input',handleInput); el.addEventListener('keydown',handleKeyDown); el.addEventListener('paste', handlePastePlain);
+      return el;
     }
     function createSheet(){ const s=document.createElement('section'); s.className='page'; return s; }
     function getLastSheet(){ let s=page.querySelector('.page:last-of-type'); if(!s){ s=createSheet(); page.appendChild(s);} return s; }
@@ -190,6 +191,48 @@
 
     function getCaretCharacterOffsetWithin(element){ let caretOffset=0; const sel=window.getSelection(); if(!sel||sel.rangeCount===0) return 0; const range=sel.getRangeAt(0); const pre=range.cloneRange(); pre.selectNodeContents(element); pre.setEnd(range.endContainer, range.endOffset); caretOffset=pre.toString().length; return caretOffset; }
     function setCaretCharacterOffsetWithin(element, offset){ const range=document.createRange(); range.selectNodeContents(element); range.collapse(true); const stack=[element]; let charCount=0,node,found=false; while(!found && (node=stack.pop())){ if(node.nodeType===3){ const next=charCount+node.length; if(offset>=charCount && offset<=next){ range.setStart(node, offset-charCount); range.setEnd(node, offset-charCount); found=true;} charCount=next; } else { let i=node.childNodes.length; while(i--) stack.push(node.childNodes[i]); } } const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+
+    // Paste as plain text only, trimming edges
+    function insertTextAtCursor(text, el){
+      const sel=window.getSelection();
+      if(!sel || sel.rangeCount===0){
+        el.appendChild(document.createTextNode(text));
+        placeCaretAtEnd(el);
+        return;
+      }
+      const range=sel.getRangeAt(0);
+      range.deleteContents();
+      const node=document.createTextNode(text);
+      range.insertNode(node);
+      // Move caret to end of inserted text
+      range.setStart(node, node.length);
+      range.setEnd(node, node.length);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    function handlePastePlain(e){
+      e.preventDefault();
+      const el=e.currentTarget;
+      let txt='';
+      if(e.clipboardData) txt = e.clipboardData.getData('text/plain');
+      else if(window.clipboardData) txt = window.clipboardData.getData('Text');
+      if(typeof txt !== 'string') txt='';
+      // Normalize whitespace and trim
+      txt = txt.replace(/\r\n?/g,'\n').replace(/\u00A0/g,' ');
+      txt = txt.replace(/[ \t]+$/gm,'');
+      txt = txt.trim();
+      if(!txt) return;
+      insertTextAtCursor(txt, el);
+      // Update empty flag and enforce casing for some types while preserving caret
+      el.dataset.empty = el.textContent.trim()? 'false':'true';
+      if(['slug','character','transition'].includes(el.dataset.type)){
+        const start=getCaretCharacterOffsetWithin(el);
+        el.textContent = el.textContent.toUpperCase();
+        setCaretCharacterOffsetWithin(el,start);
+      }
+      markDirty();
+      repaginateDebounced();
+    }
 
     function handleInput(e){ const el=e.currentTarget; el.dataset.empty=el.textContent.trim()?'false':'true'; if(['slug','character','transition'].includes(el.dataset.type)){ const start=getCaretCharacterOffsetWithin(el); el.textContent=el.textContent.toUpperCase(); setCaretCharacterOffsetWithin(el,start);} markDirty(); repaginateDebounced(); }
 
