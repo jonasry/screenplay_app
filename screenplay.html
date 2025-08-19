@@ -37,6 +37,7 @@
     .pages{margin-top:var(--toolbar-h, 3.2em)}
     .page{box-sizing:border-box;width:8.5in;height:11in;margin:1em auto 2em;background:#fff;color:var(--ink);padding:1in 1in 1in 1.5in;box-shadow:0 8px 24px rgba(0,0,0,.08);overflow:hidden;position:relative;z-index:0}
     .page + .page::before{content:'';position:absolute;top:-1em;left:50%;transform:translateX(-50%);width:7.5in;border-top:1px dashed #ddd}
+    .page .page-num{position:absolute;top:0.75in;left:7.5in;transform:translateY(-100%);font:inherit;line-height:1em;color:var(--ink);pointer-events:none;white-space:nowrap}
     .block{outline:none;white-space:pre-wrap}
     .block+.block{margin-top:.5em}
     .slug{text-transform:uppercase}
@@ -395,6 +396,13 @@
           }
         }
       }
+
+      // Add page numbers
+      const sheets = page.querySelectorAll('.page');
+      sheets.forEach((s, i)=>{
+        s.querySelectorAll('.page-num').forEach(n=>n.remove());
+        const n=document.createElement('div'); n.className='page-num'; n.textContent=String(i+1); s.appendChild(n);
+      });
 
       // Restore caret if possible
       if(active && active.isConnected){
